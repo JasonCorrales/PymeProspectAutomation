@@ -1,0 +1,22 @@
+[project]
+name = "costa-rica-pyme-prospect-automation"
+version = "0.1.0"
+description = "Local MVP for Costa Rica PYME prospect intake, review, and outreach tracking."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "pandas>=2.2",
+  "psycopg2-binary>=2.9",
+  "python-dotenv>=1.0",
+  "SQLAlchemy>=2.0",
+  "streamlit>=1.36",
+]
+
+[project.optional-dependencies]
+dev = []
+
+[tool.setuptools]
+packages = ["app"]
+
+[tool.ruff]
+line-length = 100

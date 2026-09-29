@@ -1,0 +1,14 @@
+# Local Pi runtime state
+.atl/
+
+# Python/runtime artifacts
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+
+# Local configuration and demo/runtime files
+.env
+*.db
+*.log
+*.pid
