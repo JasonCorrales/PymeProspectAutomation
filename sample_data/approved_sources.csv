@@ -1,0 +1,3 @@
+source_name,source_type,segment,province,canton,terms_status,source_url,usage_notes
+professional_services_sj_manual_seed,approved_pilot_csv,Professional services,San José,San José,approved_manual_seed,https://example.com/approved-source-registry,"Manual or permission-based pilot seed for professional services in San José. Replace with a real approved source only after terms are reviewed."
+pilot_sample_csv,sample_csv,General sample,Multiple,Multiple,sample_only,https://example.com/sample-source,"Synthetic sample data for local testing only."

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from enum import Enum
 
-from sqlalchemy import DateTime, Enum as SAEnum, ForeignKey, Index, String, Text, UniqueConstraint
+from sqlalchemy import Date, DateTime, Enum as SAEnum, ForeignKey, Index, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
@@ -18,8 +18,31 @@ class CompanyStatus(str, Enum):
     disqualified = "disqualified"
 
 
+class ProspectPriority(str, Enum):
+    low = "low"
+    medium = "medium"
+    high = "high"
+
+
+class PymeInterest(str, Enum):
+    unknown = "unknown"
+    interested = "interested"
+    not_interested = "not_interested"
+    already_certified = "already_certified"
+    needs_education = "needs_education"
+
+
+class CertificationEvidenceStatus(str, Enum):
+    unknown = "unknown"
+    needs_direct_validation = "needs_direct_validation"
+    certified_with_public_evidence = "certified_with_public_evidence"
+    not_found_in_public_source = "not_found_in_public_source"
+    expired_with_public_evidence = "expired_with_public_evidence"
+
+
 class SourceType(str, Enum):
     sample_csv = "sample_csv"
+    approved_pilot_csv = "approved_pilot_csv"
     public_directory = "public_directory"
     referral = "referral"
     manual = "manual"
@@ -49,6 +72,18 @@ class Company(Base):
     status: Mapped[CompanyStatus] = mapped_column(
         SAEnum(CompanyStatus, name="company_status"), default=CompanyStatus.new, nullable=False
     )
+    prospect_priority: Mapped[ProspectPriority] = mapped_column(
+        SAEnum(ProspectPriority, name="prospect_priority"),
+        default=ProspectPriority.medium,
+        nullable=False,
+    )
+    next_follow_up_date: Mapped[date | None] = mapped_column(Date)
+    responsible_person: Mapped[str | None] = mapped_column(String(128))
+    contact_result: Mapped[str | None] = mapped_column(String(255))
+    pyme_interest: Mapped[PymeInterest] = mapped_column(
+        SAEnum(PymeInterest, name="pyme_interest"), default=PymeInterest.unknown, nullable=False
+    )
+    estimated_renewal_date: Mapped[date | None] = mapped_column(Date)
     notes: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
@@ -71,6 +106,7 @@ class Company(Base):
     __table_args__ = (
         Index("ix_companies_normalized_name", "normalized_name"),
         Index("ix_companies_sector_province", "sector", "province"),
+        Index("ix_companies_priority_followup", "prospect_priority", "next_follow_up_date"),
     )
 
 
@@ -103,6 +139,8 @@ class DataSource(Base):
     )
     source_name: Mapped[str] = mapped_column(String(255), nullable=False)
     source_url: Mapped[str | None] = mapped_column(String(1024))
+    terms_status: Mapped[str | None] = mapped_column(String(128))
+    usage_notes: Mapped[str | None] = mapped_column(Text)
     evidence_text: Mapped[str | None] = mapped_column(Text)
     imported_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     scrape_run_id: Mapped[int | None] = mapped_column(ForeignKey("scrape_runs.id"))
@@ -121,7 +159,11 @@ class CertificationStatus(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     company_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), nullable=False)
     certification_name: Mapped[str] = mapped_column(String(255), nullable=False)
-    status: Mapped[str] = mapped_column(String(128), default="unknown", nullable=False)
+    status: Mapped[CertificationEvidenceStatus] = mapped_column(
+        SAEnum(CertificationEvidenceStatus, name="certification_evidence_status"),
+        default=CertificationEvidenceStatus.unknown,
+        nullable=False,
+    )
     evidence_url: Mapped[str | None] = mapped_column(String(1024))
     evidence_text: Mapped[str | None] = mapped_column(Text)
     checked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

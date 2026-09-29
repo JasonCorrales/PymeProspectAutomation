@@ -2,7 +2,7 @@
 
 Feature: Build an initial Python/PostgreSQL automation with an admin dashboard for Costa Rica PYME prospect discovery and certification-status tracking.
 
-Status: MVP scaffold complete
+Status: pilot implementation complete
 
 Constraints:
 - Use only public or authorized data sources.
@@ -33,6 +33,19 @@ Constraints:
 
 ## Open items
 
-- Choose the first concrete public source/sector/canton for live ingestion.
-- Initialize Git before commit-based evidence can be recorded.
 - Optional: create `.env` locally from the README example values; the harness blocks creating `.env.example` directly.
+
+## Pilot implementation tasks
+
+Selected pilot: professional services in San José.
+
+- [x] P1: Define the pilot segment inside the app and documentation.
+  - Evidence: `README.md` and `app/dashboard.py` define professional services in San José.
+- [x] P2: Add a controlled real-source importer pattern for the selected pilot, using an approved-source registry and CSV/manual seed data rather than unapproved scraping.
+  - Evidence: `sample_data/approved_sources.csv`, `sample_data/professional_services_san_jose.csv`, and `scripts/import_companies_csv.py`.
+- [x] P3: Add commercial follow-up fields for prospect priority, next follow-up date, responsible person, contact result, PYME interest, and estimated renewal date.
+  - Evidence: `app/models.py`, `scripts/import_companies_csv.py`, and `app/dashboard.py`.
+- [x] P4: Add safe PYME certification validation statuses that never assert certification without official/public evidence.
+  - Evidence: `CertificationEvidenceStatus` in `app/models.py` and README certification rules.
+- [x] P5: Prepare the SQLite-to-PostgreSQL path with clear commands and migration notes.
+  - Evidence: `app/schema_evolution.py`, `app/init_db.py`, and README SQLite/PostgreSQL workflow.

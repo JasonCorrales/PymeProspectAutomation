@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 from io import StringIO
 
 import pandas as pd
@@ -9,8 +10,15 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import selectinload
 
 from app.config import settings
-from app.db import SessionLocal, init_db
-from app.models import Company, CompanyStatus, OutreachNote
+from app.db import SessionLocal, engine, init_db
+from app.models import (
+    Company,
+    CompanyStatus,
+    OutreachNote,
+    ProspectPriority,
+    PymeInterest,
+)
+from app.schema_evolution import evolve_local_schema
 
 
 STATUS_LABELS: dict[CompanyStatus, str] = {
@@ -22,8 +30,25 @@ STATUS_LABELS: dict[CompanyStatus, str] = {
 }
 STATUS_BY_LABEL = {label: status for status, label in STATUS_LABELS.items()}
 
+PRIORITY_LABELS: dict[ProspectPriority, str] = {
+    ProspectPriority.low: "Baja",
+    ProspectPriority.medium: "Media",
+    ProspectPriority.high: "Alta",
+}
+PRIORITY_BY_LABEL = {label: priority for priority, label in PRIORITY_LABELS.items()}
+
+PYME_INTEREST_LABELS: dict[PymeInterest, str] = {
+    PymeInterest.unknown: "Desconocido",
+    PymeInterest.interested: "Interesado",
+    PymeInterest.not_interested: "No interesado",
+    PymeInterest.already_certified: "Ya certificado",
+    PymeInterest.needs_education: "Necesita educación",
+}
+PYME_INTEREST_BY_LABEL = {label: interest for interest, label in PYME_INTEREST_LABELS.items()}
+
 SOURCE_TYPE_LABELS = {
     "sample_csv": "CSV de muestra",
+    "approved_pilot_csv": "CSV piloto aprobado",
     "public_directory": "Directorio público",
     "referral": "Referencia",
     "manual": "Manual",
@@ -33,13 +58,20 @@ SOURCE_TYPE_LABELS = {
 st.set_page_config(page_title=settings.app_title, layout="wide")
 st.title("Prospectos PYME Costa Rica")
 st.caption(
-    "Dashboard local para revisar prospectos PYME, fuentes, certificación y seguimiento comercial. "
-    "Este MVP no realiza scraping en vivo."
+    "Piloto: servicios profesionales en San José. Dashboard local para revisar prospectos, "
+    "fuentes, certificación y seguimiento comercial. Este MVP no realiza scraping en vivo."
 )
 
 
 @st.cache_data(ttl=30)
-def load_companies(search: str, province: str, sector: str, status: str) -> pd.DataFrame:
+def load_companies(
+    search: str,
+    province: str,
+    sector: str,
+    status: str,
+    priority: str,
+    pyme_interest: str,
+) -> pd.DataFrame:
     with SessionLocal() as session:
         query = select(Company)
         if search:
@@ -51,6 +83,10 @@ def load_companies(search: str, province: str, sector: str, status: str) -> pd.D
             query = query.where(Company.sector == sector)
         if status and status != "Todos":
             query = query.where(Company.status == STATUS_BY_LABEL[status])
+        if priority and priority != "Todas":
+            query = query.where(Company.prospect_priority == PRIORITY_BY_LABEL[priority])
+        if pyme_interest and pyme_interest != "Todos":
+            query = query.where(Company.pyme_interest == PYME_INTEREST_BY_LABEL[pyme_interest])
 
         companies = session.scalars(query.order_by(Company.legal_name)).all()
         return pd.DataFrame(
@@ -67,6 +103,14 @@ def load_companies(search: str, province: str, sector: str, status: str) -> pd.D
                     "website": company.website,
                     "status": company.status.value,
                     "status_label": STATUS_LABELS[company.status],
+                    "priority": company.prospect_priority.value,
+                    "priority_label": PRIORITY_LABELS[company.prospect_priority],
+                    "next_follow_up_date": company.next_follow_up_date,
+                    "responsible_person": company.responsible_person,
+                    "contact_result": company.contact_result,
+                    "pyme_interest": company.pyme_interest.value,
+                    "pyme_interest_label": PYME_INTEREST_LABELS[company.pyme_interest],
+                    "estimated_renewal_date": company.estimated_renewal_date,
                 }
                 for company in companies
             ]
@@ -113,11 +157,26 @@ def add_outreach_note(
     st.cache_data.clear()
 
 
-def update_company_status(company_id: int, status: CompanyStatus) -> None:
+def update_company_tracking(
+    company_id: int,
+    status: CompanyStatus,
+    priority: ProspectPriority,
+    next_follow_up_date: date | None,
+    responsible_person: str | None,
+    contact_result: str | None,
+    pyme_interest: PymeInterest,
+    estimated_renewal_date: date | None,
+) -> None:
     with SessionLocal() as session:
         company = session.get(Company, company_id)
         if company:
             company.status = status
+            company.prospect_priority = priority
+            company.next_follow_up_date = next_follow_up_date
+            company.responsible_person = responsible_person
+            company.contact_result = contact_result
+            company.pyme_interest = pyme_interest
+            company.estimated_renewal_date = estimated_renewal_date
             session.commit()
     st.cache_data.clear()
 
@@ -133,6 +192,7 @@ def company_table(companies_df: pd.DataFrame) -> int | None:
             "canton",
             "email",
             "phone",
+            "priority_label",
             "status_label",
         ]
     ].rename(
@@ -145,6 +205,7 @@ def company_table(companies_df: pd.DataFrame) -> int | None:
             "canton": "Cantón",
             "email": "Correo",
             "phone": "Teléfono",
+            "priority_label": "Prioridad",
             "status_label": "Estado",
         }
     )
@@ -166,6 +227,7 @@ def company_table(companies_df: pd.DataFrame) -> int | None:
             "Cantón": st.column_config.TextColumn("Cantón", width="small"),
             "Correo": st.column_config.TextColumn("Correo", width="medium"),
             "Teléfono": st.column_config.TextColumn("Teléfono", width="small"),
+            "Prioridad": st.column_config.TextColumn("Prioridad", width="small"),
             "Estado": st.column_config.TextColumn("Estado", width="small"),
         },
     )
@@ -177,19 +239,28 @@ def company_table(companies_df: pd.DataFrame) -> int | None:
     return int(companies_df.iloc[selected_position]["id"])
 
 
+def optional_date_input(label: str, value: date | None) -> date | None:
+    enabled = st.checkbox(f"Definir {label.lower()}", value=value is not None, key=f"enable_{label}")
+    if not enabled:
+        return None
+    return st.date_input(label, value=value or date.today())
+
+
 def render_company_detail(company: Company) -> None:
     st.markdown(f"### {company.legal_name}")
 
     summary_left, summary_mid, summary_right = st.columns(3)
     summary_left.metric("Estado comercial", STATUS_LABELS[company.status])
-    summary_mid.metric("Sector", company.sector or "Sin dato")
-    summary_right.metric("Ubicación", ", ".join(part for part in [company.canton, company.province] if part) or "Sin dato")
+    summary_mid.metric("Prioridad", PRIORITY_LABELS[company.prospect_priority])
+    summary_right.metric("Interés PYME", PYME_INTEREST_LABELS[company.pyme_interest])
 
     with st.expander("Información general", expanded=True):
         st.write(
             {
                 "Nombre comercial": company.trade_name,
                 "Razón social": company.legal_name,
+                "Sector": company.sector,
+                "Ubicación": ", ".join(part for part in [company.canton, company.province] if part),
                 "Sitio web": company.website,
                 "Correo principal": company.email,
                 "Teléfono principal": company.phone,
@@ -197,16 +268,51 @@ def render_company_detail(company: Company) -> None:
             }
         )
 
-    status_options = list(STATUS_LABELS.values())
-    selected_status_label = st.selectbox(
-        "Actualizar estado comercial",
-        status_options,
-        index=status_options.index(STATUS_LABELS[company.status]),
-    )
-    if st.button("Guardar estado"):
-        update_company_status(company.id, STATUS_BY_LABEL[selected_status_label])
-        st.success("Estado actualizado.")
-        st.rerun()
+    with st.expander("Seguimiento comercial", expanded=True):
+        status_options = list(STATUS_LABELS.values())
+        priority_options = list(PRIORITY_LABELS.values())
+        interest_options = list(PYME_INTEREST_LABELS.values())
+
+        tracking_left, tracking_right = st.columns(2)
+        with tracking_left:
+            selected_status_label = st.selectbox(
+                "Estado comercial",
+                status_options,
+                index=status_options.index(STATUS_LABELS[company.status]),
+            )
+            selected_priority_label = st.selectbox(
+                "Prioridad",
+                priority_options,
+                index=priority_options.index(PRIORITY_LABELS[company.prospect_priority]),
+            )
+            responsible_person = st.text_input("Responsable", value=company.responsible_person or "")
+            next_follow_up_date = optional_date_input(
+                "Próximo seguimiento", company.next_follow_up_date
+            )
+        with tracking_right:
+            selected_interest_label = st.selectbox(
+                "Interés en certificación PYME",
+                interest_options,
+                index=interest_options.index(PYME_INTEREST_LABELS[company.pyme_interest]),
+            )
+            contact_result = st.text_input("Resultado del contacto", value=company.contact_result or "")
+            estimated_renewal_date = optional_date_input(
+                "Renovación estimada", company.estimated_renewal_date
+            )
+
+        if st.button("Guardar seguimiento"):
+            update_company_tracking(
+                company.id,
+                STATUS_BY_LABEL[selected_status_label],
+                PRIORITY_BY_LABEL[selected_priority_label],
+                next_follow_up_date,
+                responsible_person.strip() or None,
+                contact_result.strip() or None,
+                PYME_INTEREST_BY_LABEL[selected_interest_label],
+                estimated_renewal_date,
+            )
+            st.success("Seguimiento actualizado.")
+            st.rerun()
 
     detail_left, detail_right = st.columns(2)
     with detail_left:
@@ -227,7 +333,7 @@ def render_company_detail(company: Company) -> None:
         certifications = [
             {
                 "Certificación": cert.certification_name,
-                "Estado": cert.status,
+                "Estado seguro": cert.status.value,
                 "Fuente": cert.evidence_url,
                 "Evidencia": cert.evidence_text,
             }
@@ -242,7 +348,9 @@ def render_company_detail(company: Company) -> None:
                 st.info(
                     f"**{source.source_name}** · "
                     f"{SOURCE_TYPE_LABELS.get(source.source_type.value, source.source_type.value)}\n\n"
+                    f"Términos/uso: {source.terms_status or 'Sin validar'}\n\n"
                     f"URL: {source.source_url or 'Sin URL'}\n\n"
+                    f"Notas de uso: {source.usage_notes or 'Sin notas'}\n\n"
                     f"Evidencia: {source.evidence_text or 'Sin evidencia textual'}"
                 )
         else:
@@ -282,9 +390,13 @@ def render_company_detail(company: Company) -> None:
 
 with st.sidebar:
     st.header("Filtros")
-    if st.button("Inicializar tablas"):
+    if st.button("Inicializar / actualizar tablas"):
         init_db()
-        st.success("Las tablas de la base de datos están listas.")
+        added_columns = evolve_local_schema(engine)
+        if added_columns:
+            st.success("Tablas actualizadas: " + ", ".join(added_columns))
+        else:
+            st.success("Las tablas de la base de datos están listas.")
         st.cache_data.clear()
 
     try:
@@ -300,9 +412,11 @@ with st.sidebar:
     province = st.selectbox("Provincia", ["Todas", *provinces])
     sector = st.selectbox("Sector", ["Todos", *sectors])
     status = st.selectbox("Estado", ["Todos", *STATUS_LABELS.values()])
+    priority = st.selectbox("Prioridad", ["Todas", *PRIORITY_LABELS.values()])
+    pyme_interest = st.selectbox("Interés PYME", ["Todos", *PYME_INTEREST_LABELS.values()])
 
 try:
-    companies_df = load_companies(search, province, sector, status)
+    companies_df = load_companies(search, province, sector, status, priority, pyme_interest)
 except SQLAlchemyError as exc:
     st.warning(
         f"No se pudieron cargar las empresas: {exc.__class__.__name__}. "
@@ -317,7 +431,9 @@ else:
     selected_company_id = company_table(companies_df)
 
     csv_buffer = StringIO()
-    export_df = companies_df.drop(columns=["status_label"]).rename(columns={"status": "pipeline_status"})
+    export_df = companies_df.drop(columns=["status_label", "priority_label", "pyme_interest_label"]).rename(
+        columns={"status": "pipeline_status"}
+    )
     export_df.to_csv(csv_buffer, index=False)
     st.download_button(
         "Exportar empresas filtradas a CSV",
