@@ -9,7 +9,7 @@ Constraints:
 - Store source URL/evidence and capture timestamp for every imported data point.
 - Treat certification status as unknown unless an official/public source verifies it.
 - Technical artifacts are written in English.
-- This directory is not currently a Git repository, so work-unit commits are blocked until Git is initialized by the user.
+- Git is initialized on `main` with `origin` tracking GitHub.
 
 ## Tasks
 
@@ -43,6 +43,8 @@ Selected pilot: professional services in San José.
   - Evidence: `README.md` and `app/dashboard.py` define professional services in San José.
 - [x] P2: Add a controlled real-source importer pattern for the selected pilot, using an approved-source registry and CSV/manual seed data rather than unapproved scraping.
   - Evidence: `sample_data/approved_sources.csv`, `sample_data/professional_services_san_jose.csv`, and `scripts/import_companies_csv.py`.
+- [x] P2.1: Add validation-only mode and JSON import reports for controlled sources.
+  - Evidence: `scripts/import_companies_csv.py`, README importer examples, and successful local reports for validation/import with 3 valid rows, 0 rejected rows, and 0 warnings.
 - [x] P3: Add commercial follow-up fields for prospect priority, next follow-up date, responsible person, contact result, PYME interest, and estimated renewal date.
   - Evidence: `app/models.py`, `scripts/import_companies_csv.py`, and `app/dashboard.py`.
 - [x] P4: Add safe PYME certification validation statuses that never assert certification without official/public evidence.

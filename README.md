@@ -95,11 +95,35 @@ streamlit run app/dashboard.py
 ## Importer behavior
 
 - Validates `--source-name` against `sample_data/approved_sources.csv` by default.
+- Validates required fields before writing to the database.
+- Rejects rows with missing company name, invalid dates, invalid commercial enum values, or unsafe certification statuses.
+- Warns when a row has no usable email or phone.
+- Supports `--validate-only` to check a source without importing it.
+- Supports `--report-path reports/<file>.json` for row-level validation evidence.
 - Normalizes company names for basic deduplication.
 - Prefers `tax_id` when present.
 - Upserts company, primary contact, source evidence, certification status, and commercial follow-up fields.
 - Records each import as a `scrape_runs` row, even though this MVP uses CSV import rather than live scraping.
 - Use `--allow-unregistered-source` only for local tests.
+
+Validation-only example:
+
+```bash
+python3 scripts/import_companies_csv.py \
+  sample_data/professional_services_san_jose.csv \
+  --source-name professional_services_sj_manual_seed \
+  --validate-only \
+  --report-path reports/professional_services_sj_validation.json
+```
+
+Import with report example:
+
+```bash
+python3 scripts/import_companies_csv.py \
+  sample_data/professional_services_san_jose.csv \
+  --source-name professional_services_sj_manual_seed \
+  --report-path reports/professional_services_sj_import.json
+```
 
 ## Dashboard workflow
 
