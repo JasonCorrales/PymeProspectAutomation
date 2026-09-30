@@ -5,6 +5,7 @@ description = "Local MVP for Costa Rica PYME prospect intake, review, and outrea
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+  "openpyxl>=3.1",
   "pandas>=2.2",
   "psycopg2-binary>=2.9",
   "python-dotenv>=1.0",

@@ -13,3 +13,4 @@ __pycache__/
 *.log
 *.pid
 reports/
+sample_data/*.xlsx

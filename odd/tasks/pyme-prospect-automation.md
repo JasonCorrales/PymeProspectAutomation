@@ -35,6 +35,21 @@ Constraints:
 
 - Optional: create `.env` locally from the README example values; the harness blocks creating `.env.example` directly.
 
+## MEIC active PYMES local import tasks
+
+Goal: Import the official MEIC active PYMES workbook downloaded manually from the live MEIC page, without scraping the protected HTML page.
+
+- [x] M1: Ignore local MEIC workbook files so refreshed government extracts are not committed accidentally.
+  - Evidence: `.gitignore` ignores `sample_data/*.xlsx` while tracked CSV samples remain unaffected.
+- [x] M2: Inspect workbook sheets and columns from `sample_data/meic_pymes_activas.xlsx`.
+  - Evidence: parent inspection found `Registros PYME` and `Emprendimientos Activos`, row 4 headers, workbook dimensions, and generated-date serial metadata.
+- [x] M3: Add a local XLSX import/validation script for MEIC active PYMES.
+  - Evidence: `scripts/import_meic_active_pymes.py`, `pyproject.toml` openpyxl dependency, and README local-workbook commands.
+- [x] M4: Validate the MEIC workbook against the local SQLite workflow before importing.
+  - Evidence: `reports/meic_active_pymes_validation.json` was generated from `sample_data/meic_pymes_activas.xlsx`; workbook date `2026-09-25`; 42,608 rows seen, 42,608 valid, 0 rejected, 2 warnings for missing entrepreneur identifiers, 0 rows imported in validate-only mode.
+  - Import evidence: `reports/meic_active_pymes_import.json`; `scrape_runs.id=5` completed with 42,608 rows seen, 42,421 imported, 187 updated, 0 rejected, and 2 warnings.
+  - Commit evidence: `f552426` (`feat: add MEIC active PYMES local importer`).
+
 ## Pilot implementation tasks
 
 Selected pilot: professional services in San José.

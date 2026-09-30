@@ -94,6 +94,8 @@ streamlit run app/dashboard.py
 
 ## Importer behavior
 
+### Controlled CSV importer
+
 - Validates `--source-name` against `sample_data/approved_sources.csv` by default.
 - Validates required fields before writing to the database.
 - Rejects rows with missing company name, invalid dates, invalid commercial enum values, or unsafe certification statuses.
@@ -125,6 +127,35 @@ python3 scripts/import_companies_csv.py \
   --report-path reports/professional_services_sj_import.json
 ```
 
+### MEIC active PYMES local XLSX importer
+
+The MEIC active PYMES workbook is handled as a bounded local-file import. Manually download the current workbook from the official MEIC page (`https://www.meic.go.cr/tramites-y-servicios/pymes-activas/`) and save it here:
+
+```text
+sample_data/meic_pymes_activas.xlsx
+```
+
+Do not scrape the MEIC page. Local `.xlsx` drops under `sample_data/` are ignored by Git so refreshed government workbooks are not committed accidentally.
+
+Validate the workbook against the SQLite workflow:
+
+```bash
+DATABASE_URL='sqlite:///pyme_prospects_demo.db' python3 scripts/import_meic_active_pymes.py \
+  sample_data/meic_pymes_activas.xlsx \
+  --validate-only \
+  --report-path reports/meic_active_pymes_validation.json
+```
+
+Import the validated workbook:
+
+```bash
+DATABASE_URL='sqlite:///pyme_prospects_demo.db' python3 scripts/import_meic_active_pymes.py \
+  sample_data/meic_pymes_activas.xlsx \
+  --report-path reports/meic_active_pymes_import.json
+```
+
+The importer reads the `Registros PYME` and `Emprendimientos Activos` sheets by default, uses row 4 as the header, ignores blank columns/rows, records the official MEIC page as source evidence, and only asserts `certified_with_public_evidence` for rows that are clearly active/approved in the workbook.
+
 ## Dashboard workflow
 
 From the dashboard you can:
@@ -148,6 +179,7 @@ app/
   schema_evolution.py   Additive MVP schema helper before Alembic
 scripts/
   import_companies_csv.py
+  import_meic_active_pymes.py
 sample_data/
   approved_sources.csv
   companies_sample.csv
