@@ -88,6 +88,7 @@ def load_companies(
     start_date: date | None,
     end_date: date | None,
     province: str,
+    commercial_status: str,
 ) -> pd.DataFrame:
     with SessionLocal() as session:
         query = select(Company)
@@ -104,6 +105,8 @@ def load_companies(
             query = query.where(Company.certification_valid_until <= end_date)
         if province and province != "Todas":
             query = query.where(Company.province == province)
+        if commercial_status and commercial_status != "Todos":
+            query = query.where(Company.status == STATUS_BY_LABEL[commercial_status])
 
         companies = session.scalars(query.order_by(Company.legal_name)).all()
         return pd.DataFrame(
@@ -194,6 +197,40 @@ def add_company_contact_method(
     st.cache_data.clear()
 
 
+def update_company_contact_method(
+    contact_id: int,
+    name: str,
+    contact_medium: str,
+    contact_type: ContactMethodType,
+) -> None:
+    with SessionLocal() as session:
+        contact = session.get(CompanyContactMethod, contact_id)
+        if contact:
+            contact.name = name
+            contact.contact_medium = contact_medium
+            contact.contact_type = contact_type
+            session.commit()
+    st.cache_data.clear()
+
+
+def delete_company_contact_method(contact_id: int) -> None:
+    with SessionLocal() as session:
+        contact = session.get(CompanyContactMethod, contact_id)
+        if contact:
+            session.delete(contact)
+            session.commit()
+    st.cache_data.clear()
+
+
+def delete_outreach_note(note_id: int) -> None:
+    with SessionLocal() as session:
+        note = session.get(OutreachNote, note_id)
+        if note:
+            session.delete(note)
+            session.commit()
+    st.cache_data.clear()
+
+
 def update_company_tracking(
     company_id: int,
     status: CompanyStatus,
@@ -234,6 +271,7 @@ def company_table(companies_df: pd.DataFrame) -> int | None:
             "meic_size",
             "certification_valid_until",
             "province",
+            "status_label",
         ]
     ].rename(
         columns={
@@ -243,6 +281,7 @@ def company_table(companies_df: pd.DataFrame) -> int | None:
             "meic_size": "TAMAÑO",
             "certification_valid_until": "FECHA_VIGENCIA",
             "province": "PROVINCIA",
+            "status_label": "ESTADO COMERCIAL",
         }
     )
 
@@ -265,6 +304,7 @@ def company_table(companies_df: pd.DataFrame) -> int | None:
                 format="DD/MM/YYYY",
             ),
             "PROVINCIA": st.column_config.TextColumn("PROVINCIA", width="small"),
+            "ESTADO COMERCIAL": st.column_config.TextColumn("ESTADO COMERCIAL", width="medium"),
         },
     )
 
@@ -297,11 +337,17 @@ def company_table(companies_df: pd.DataFrame) -> int | None:
     return int(page_df.iloc[selected_position]["id"])
 
 
+def format_display_date(value: date | None) -> str:
+    if value is None:
+        return "sin fecha"
+    return value.strftime("%d/%m/%Y")
+
+
 def optional_date_input(label: str, value: date | None) -> date | None:
     enabled = st.checkbox(f"Definir {label.lower()}", value=value is not None, key=f"enable_{label}")
     if not enabled:
         return None
-    return st.date_input(label, value=value or date.today())
+    return st.date_input(label, value=value or date.today(), format="DD/MM/YYYY")
 
 
 def render_company_detail(company: Company) -> None:
@@ -352,17 +398,59 @@ def render_company_detail(company: Company) -> None:
 
     with contacts_tab:
         st.markdown("#### Contactos")
-        with st.form("add_company_contact_method"):
-            contact_name = st.text_input("Nombre")
-            contact_medium = st.text_input("Medio de contacto", placeholder="correo@empresa.com o número")
+        if st.session_state.pop("contact_success", None):
+            st.success("Contacto guardado correctamente.")
+        if st.session_state.pop("contact_deleted", None):
+            st.success("Contacto eliminado correctamente.")
+
+        editing_contact_id = st.session_state.get("editing_contact_id")
+        editing_contact = next(
+            (contact for contact in company.contact_methods if contact.id == editing_contact_id),
+            None,
+        )
+        form_suffix = editing_contact.id if editing_contact else "new"
+        contact_type_values = [contact_type.value for contact_type in ContactMethodType]
+
+        form_title = "Modificar contacto" if editing_contact else "Nuevo contacto"
+        st.markdown(f"##### {form_title}")
+        if editing_contact and st.button("Nuevo", key="new_contact_mode"):
+            st.session_state.pop("editing_contact_id", None)
+            st.session_state.pop("pending_delete_contact_id", None)
+            st.rerun()
+
+        with st.form(f"company_contact_method_form_{form_suffix}", clear_on_submit=editing_contact is None):
+            contact_name = st.text_input(
+                "Nombre",
+                value=editing_contact.name if editing_contact else "",
+                key=f"contact_name_form_{form_suffix}",
+            )
+            contact_medium = st.text_input(
+                "Medio de contacto",
+                value=editing_contact.contact_medium if editing_contact else "",
+                placeholder="correo@empresa.com o número",
+                key=f"contact_medium_form_{form_suffix}",
+            )
+            selected_contact_type = editing_contact.contact_type.value if editing_contact else contact_type_values[0]
             contact_type_label = st.selectbox(
                 "Tipo de contacto",
-                [contact_type.value for contact_type in ContactMethodType],
+                contact_type_values,
+                index=contact_type_values.index(selected_contact_type),
+                key=f"contact_type_form_{form_suffix}",
             )
-            contact_submitted = st.form_submit_button("Agregar contacto")
+            contact_submitted = st.form_submit_button("Guardar cambios" if editing_contact else "Agregar contacto")
             if contact_submitted:
                 if not contact_name.strip() or not contact_medium.strip():
                     st.error("El nombre y el medio de contacto son obligatorios.")
+                elif editing_contact:
+                    update_company_contact_method(
+                        editing_contact.id,
+                        name=contact_name.strip(),
+                        contact_medium=contact_medium.strip(),
+                        contact_type=ContactMethodType(contact_type_label),
+                    )
+                    st.session_state.contact_success = True
+                    st.session_state.pop("editing_contact_id", None)
+                    st.rerun()
                 else:
                     add_company_contact_method(
                         company.id,
@@ -370,22 +458,52 @@ def render_company_detail(company: Company) -> None:
                         contact_medium=contact_medium.strip(),
                         contact_type=ContactMethodType(contact_type_label),
                     )
-                    st.success("Contacto agregado.")
+                    st.session_state.contact_success = True
                     st.rerun()
 
-        contacts = [
-            {
-                "Nombre": contact.name,
-                "Medio de contacto": contact.contact_medium,
-                "Tipo de contacto": contact.contact_type.value,
-                "Creado": contact.created_at,
-            }
-            for contact in company.contact_methods
-        ]
-        st.table(contacts or [{"Resultado": "No hay contactos registrados."}])
+        st.markdown("##### Contactos registrados")
+        if company.contact_methods:
+            header_name, header_medium, header_type, header_actions = st.columns([2, 3, 1.5, 2])
+            header_name.markdown("**Nombre**")
+            header_medium.markdown("**Medio de contacto**")
+            header_type.markdown("**Tipo**")
+            header_actions.markdown("**Acciones**")
+
+            for contact in company.contact_methods:
+                row_name, row_medium, row_type, row_actions = st.columns([2, 3, 1.5, 2])
+                row_name.write(contact.name)
+                row_medium.write(contact.contact_medium)
+                row_type.write(contact.contact_type.value)
+                with row_actions:
+                    modify_col, delete_col = st.columns(2)
+                    if modify_col.button("Modificar", key=f"edit_contact_{contact.id}"):
+                        st.session_state.editing_contact_id = contact.id
+                        st.session_state.pop("pending_delete_contact_id", None)
+                        st.rerun()
+                    if delete_col.button("Eliminar", key=f"request_delete_contact_{contact.id}"):
+                        st.session_state.pending_delete_contact_id = contact.id
+                        st.rerun()
+
+                if st.session_state.get("pending_delete_contact_id") == contact.id:
+                    st.warning(f"¿Eliminar el contacto de {contact.name}?")
+                    confirm_col, cancel_col = st.columns([1, 5])
+                    if confirm_col.button("Sí, eliminar", key=f"confirm_delete_contact_{contact.id}"):
+                        delete_company_contact_method(contact.id)
+                        st.session_state.contact_deleted = True
+                        st.session_state.pop("pending_delete_contact_id", None)
+                        if st.session_state.get("editing_contact_id") == contact.id:
+                            st.session_state.pop("editing_contact_id", None)
+                        st.rerun()
+                    if cancel_col.button("Cancelar", key=f"cancel_delete_contact_{contact.id}"):
+                        st.session_state.pop("pending_delete_contact_id", None)
+                        st.rerun()
+        else:
+            st.info("No hay contactos registrados.")
 
     with add_note_tab:
-        with st.form("add_outreach_note"):
+        if st.session_state.pop("note_success", None):
+            st.success("Nota comercial guardada correctamente.")
+        with st.form("add_outreach_note", clear_on_submit=True):
             st.markdown("#### Agregar nota comercial")
             note = st.text_area("Nota")
             channel = st.text_input("Canal", placeholder="correo, teléfono, LinkedIn, reunión")
@@ -403,17 +521,25 @@ def render_company_detail(company: Company) -> None:
                         next_action=next_action.strip() or None,
                         created_by=created_by.strip() or None,
                     )
-                    st.success("Nota comercial agregada.")
+                    st.session_state.note_success = True
                     st.rerun()
 
     with history_tab:
         st.markdown("#### Historial comercial")
+        if st.session_state.pop("note_deleted", None):
+            st.success("Nota comercial eliminada correctamente.")
         if company.outreach_notes:
             for note in company.outreach_notes:
-                st.info(
-                    f"{note.created_at:%Y-%m-%d %H:%M} | {note.channel or 'sin canal'} | "
+                note_text = (
+                    f"{format_display_date(note.created_at)} | {note.channel or 'sin canal'} | "
                     f"{note.note} | Próxima acción: {note.next_action or 'ninguna'}"
                 )
+                note_col, delete_col = st.columns([12, 1])
+                note_col.info(note_text)
+                if delete_col.button("❌", key=f"delete_note_{note.id}", help="Eliminar nota"):
+                    delete_outreach_note(note.id)
+                    st.session_state.note_deleted = True
+                    st.rerun()
         else:
             st.info("Todavía no hay notas comerciales.")
 
@@ -445,6 +571,7 @@ with st.sidebar:
         st.session_state.filter_start_date = None
         st.session_state.filter_end_date = None
         st.session_state.filter_province = "Todas"
+        st.session_state.filter_commercial_status = "Todos"
         st.session_state.company_table_page = 1
         st.rerun()
 
@@ -464,13 +591,26 @@ with st.sidebar:
         key="filter_end_date",
     )
     province = st.selectbox("Provincia", ["Todas", *provinces], key="filter_province")
+    commercial_status = st.selectbox(
+        "Estado comercial",
+        ["Todos", *STATUS_LABELS.values()],
+        key="filter_commercial_status",
+    )
 
 if start_date and end_date and start_date > end_date:
     st.warning("La fecha inicio no puede ser posterior a la fecha fin.")
     companies_df = pd.DataFrame()
 else:
     try:
-        companies_df = load_companies(search, sector, meic_size, start_date, end_date, province)
+        companies_df = load_companies(
+            search,
+            sector,
+            meic_size,
+            start_date,
+            end_date,
+            province,
+            commercial_status,
+        )
     except SQLAlchemyError as exc:
         st.warning(
             f"No se pudieron cargar las empresas: {exc.__class__.__name__}. "
