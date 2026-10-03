@@ -9,17 +9,17 @@ The first commercial pilot is:
 - **Segment:** professional services
 - **Location:** San José, Costa Rica
 - **Collection mode:** controlled CSV/manual seed only until each real source is approved
-- **Goal:** validate prospect quality, outreach workflow, and PYME certification interest before broad scraping or enrichment
+- **Goal:** validate prospect quality and outreach workflow before broad scraping or enrichment
 
 ## What is included
 
 - Python project with SQLAlchemy 2.0 models that can be reused from FastAPI endpoints later.
 - SQLite-compatible local demo and PostgreSQL service via Docker Compose.
 - Environment-variable based configuration.
-- Database initialization and additive local schema-evolution helper.
+- Database initialization and local schema-evolution helper.
 - CSV importer with basic normalization, deduplication, approved-source registry checks, and source evidence capture.
 - Sample CSV data under `sample_data/`.
-- Spanish Streamlit dashboard to filter companies, select a row, inspect details, update commercial follow-up fields, inspect certification/source evidence, add outreach notes, and export filtered CSV.
+- Spanish Streamlit dashboard to filter companies, select a row, update commercial follow-up fields, register contact methods, add outreach notes, and export filtered CSV.
 
 ## Data-use and legal notes
 
@@ -104,7 +104,7 @@ streamlit run app/dashboard.py
 - Supports `--report-path reports/<file>.json` for row-level validation evidence.
 - Normalizes company names for basic deduplication.
 - Prefers `tax_id` when present.
-- Upserts company, primary contact, source evidence, certification status, and commercial follow-up fields.
+- Upserts company, primary contact, source evidence, certification status, certification validity date, and commercial follow-up fields.
 - Records each import as a `scrape_runs` row, even though this MVP uses CSV import rather than live scraping.
 - Use `--allow-unregistered-source` only for local tests.
 
@@ -160,17 +160,17 @@ DATABASE_URL='sqlite:///pyme_prospects_demo.db' python3 scripts/import_meic_acti
   --report-path reports/meic_active_pymes_import.json
 ```
 
-The local test workflow reads only the `Registros PYME` sheet via `--sheet pyme`, limits the import to the first 500 valid rows with `--limit 500`, and uses `--replace-existing` to clear existing database records before loading the bounded dataset. The importer uses row 4 as the header, ignores blank columns/rows, records the official MEIC page as source evidence, and only asserts `certified_with_public_evidence` for rows that are clearly active/approved in the workbook.
+The local test workflow reads only the `Registros PYME` sheet via `--sheet pyme`, limits the import to the first 500 valid rows with `--limit 500`, and uses `--replace-existing` to clear existing database records before loading the bounded dataset. The importer uses row 4 as the header, stores `FECHA_VIGENCIA` as `certification_valid_until` for table display/date filters, ignores blank columns/rows, records the official MEIC page as source evidence, and only asserts `certified_with_public_evidence` for rows that are clearly active/approved in the workbook.
 
 ## Dashboard workflow
 
 From the dashboard you can:
 
-- Filter companies by name, province, sector, commercial status, priority, and PYME interest.
+- Filter companies by name, province, sector, MEIC size, and `FECHA_VIGENCIA` date range.
 - Select one company from the main table.
-- Inspect contacts, safe certification status, source evidence, terms/usage notes, and commercial history.
-- Update priority, next follow-up date, responsible person, contact result, PYME interest, and estimated renewal date.
-- Add outreach notes and next actions.
+- Inspect and register contact methods in the `Contactos` tab.
+- Update priority, next follow-up date, responsible person, and contact result.
+- Add outreach notes and next actions from the commercial-note tab, and review commercial history in its own tab.
 - Export the filtered company list as CSV.
 
 ## Project layout
