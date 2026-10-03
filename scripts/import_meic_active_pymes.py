@@ -14,6 +14,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 import pandas as pd
+from sqlalchemy import text
 from openpyxl import load_workbook
 from openpyxl.utils.datetime import from_excel
 from app.db import SessionLocal, engine, init_db
@@ -74,6 +75,8 @@ class ImportReport:
     xlsx_path: str
     sheets: list[str]
     workbook_generated_date: str | None
+    requested_limit: int | None
+    limit_reached: bool
     rows_seen: int
     rows_valid: int
     rows_rejected: int
@@ -203,6 +206,7 @@ def mapped_import_row(sheet_name: str, row: dict[str, object]) -> dict[str, obje
         "legal_name": clean(row.get("NOMBRE")),
         "tax_id": stringify_identifier(row.get("IDENTIFICACION")),
         "sector": sector,
+        "meic_size": clean(row.get("TAMAÑO")),
         "province": clean(row.get("PROVINCIA")),
         "canton": clean(row.get("CANTÓN")),
         "notes": build_notes(sheet_name, row),
@@ -249,6 +253,7 @@ def validate_mapped_row(sheet_name: str, row_number: int, row: dict[str, object]
 def collect_rows(
     xlsx_path: Path,
     requested_sheet: str,
+    limit: int | None = None,
 ) -> tuple[list[dict[str, object]], list[ValidationIssue], ImportReport]:
     workbook = load_workbook(xlsx_path, read_only=True, data_only=True)
     selected = SHEET_ALIASES[requested_sheet]
@@ -270,6 +275,8 @@ def collect_rows(
 
         seen = valid = rejected = 0
         for row_number, row in iter_sheet_rows(workbook, sheet_name):
+            if limit is not None and rows_seen >= limit:
+                break
             seen += 1
             rows_seen += 1
             row_issues = validate_mapped_row(sheet_name, row_number, row)
@@ -283,12 +290,16 @@ def collect_rows(
             mapped_rows.append(mapped)
             valid += 1
         sheet_summaries[sheet_name] = {"seen": seen, "valid": valid, "rejected": rejected}
+        if limit is not None and rows_seen >= limit:
+            break
 
     report = ImportReport(
         source_name=DEFAULT_SOURCE_NAME,
         xlsx_path=str(xlsx_path),
         sheets=sheet_names,
         workbook_generated_date=generated_date,
+        requested_limit=limit,
+        limit_reached=limit is not None and rows_seen >= limit,
         rows_seen=rows_seen,
         rows_valid=len(mapped_rows),
         rows_rejected=rows_seen - len(mapped_rows),
@@ -309,11 +320,25 @@ def write_validation_report(report_path: Path, report: ImportReport, issues: lis
 
 def update_company_fields(company: Company, row: dict[str, object]) -> None:
     company.sector = clean(row.get("sector")) or company.sector
+    company.meic_size = clean(row.get("meic_size")) or company.meic_size
     company.province = clean(row.get("province")) or company.province
     company.canton = clean(row.get("canton")) or company.canton
     company.notes = clean(row.get("notes")) or company.notes
     company.estimated_renewal_date = parse_excel_date(row.get("estimated_renewal_date")) or company.estimated_renewal_date
     company.pyme_interest = PymeInterest.already_certified
+
+
+def replace_existing_database_records(session: Any) -> None:
+    """Clear local import data in dependency order before a bounded test import."""
+    for table_name in (
+        "outreach_notes",
+        "certification_statuses",
+        "contacts",
+        "data_sources",
+        "companies",
+        "scrape_runs",
+    ):
+        session.execute(text(f"DELETE FROM {table_name}"))
 
 
 def import_rows(
@@ -323,6 +348,7 @@ def import_rows(
     issues: list[ValidationIssue],
     report_path: Path | None,
     validate_only: bool,
+    replace_existing: bool = False,
 ) -> tuple[ScrapeRun | None, ImportReport, list[ValidationIssue]]:
     report.source_name = source_name
     if validate_only:
@@ -333,6 +359,8 @@ def import_rows(
     init_db()
     evolve_local_schema(engine)
     with SessionLocal() as session:
+        if replace_existing:
+            replace_existing_database_records(session)
         run = ScrapeRun(
             source_name=source_name,
             source_type=SourceType.public_directory,
@@ -404,15 +432,18 @@ def import_workbook(
     sheet: str = "all",
     report_path: Path | None = None,
     validate_only: bool = False,
+    limit: int | None = None,
+    replace_existing: bool = False,
 ) -> tuple[ScrapeRun | None, ImportReport, list[ValidationIssue]]:
-    rows, issues, report = collect_rows(xlsx_path, sheet)
-    return import_rows(rows, source_name, report, issues, report_path, validate_only)
+    rows, issues, report = collect_rows(xlsx_path, sheet, limit=limit)
+    return import_rows(rows, source_name, report, issues, report_path, validate_only, replace_existing=replace_existing)
 
 
 def print_report(report: ImportReport, issues: list[ValidationIssue]) -> None:
     print(
-        f"MEIC XLSX import report: source={report.source_name}, seen={report.rows_seen}, "
-        f"valid={report.rows_valid}, rejected={report.rows_rejected}, warnings={report.warnings}, "
+        f"MEIC XLSX import report: source={report.source_name}, sheets={','.join(report.sheets)}, "
+        f"limit={report.requested_limit or 'none'}, limit_reached={report.limit_reached}, "
+        f"seen={report.rows_seen}, valid={report.rows_valid}, rejected={report.rows_rejected}, warnings={report.warnings}, "
         f"imported={report.imported}, updated={report.updated}"
     )
     for sheet_name, summary in report.sheet_summaries.items():
@@ -445,6 +476,16 @@ def main() -> None:
         help="Workbook sheet to process; default imports all known MEIC sheets when present",
     )
     parser.add_argument(
+        "--limit",
+        type=int,
+        help="Maximum number of valid rows to collect across the selected sheet(s)",
+    )
+    parser.add_argument(
+        "--replace-existing",
+        action="store_true",
+        help="Delete existing local database records in dependency order before importing",
+    )
+    parser.add_argument(
         "--report-path",
         type=Path,
         help="Optional JSON report path with validation summary and row-level issues",
@@ -455,6 +496,8 @@ def main() -> None:
         help="Validate the workbook and write/report issues without importing rows",
     )
     args = parser.parse_args()
+    if args.limit is not None and args.limit < 1:
+        parser.error("--limit must be a positive integer")
 
     run, report, issues = import_workbook(
         args.xlsx_path,
@@ -462,6 +505,8 @@ def main() -> None:
         sheet=args.sheet,
         report_path=args.report_path,
         validate_only=args.validate_only,
+        limit=args.limit,
+        replace_existing=args.replace_existing,
     )
     print_report(report, issues)
     if args.report_path:

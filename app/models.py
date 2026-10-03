@@ -64,6 +64,7 @@ class Company(Base):
     normalized_name: Mapped[str] = mapped_column(String(255), nullable=False)
     tax_id: Mapped[str | None] = mapped_column(String(64), unique=True)
     sector: Mapped[str | None] = mapped_column(String(128))
+    meic_size: Mapped[str | None] = mapped_column(String(64))
     province: Mapped[str | None] = mapped_column(String(128))
     canton: Mapped[str | None] = mapped_column(String(128))
     website: Mapped[str | None] = mapped_column(String(512))

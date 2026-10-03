@@ -11,6 +11,7 @@ COMPANY_COLUMNS = {
     "contact_result": "VARCHAR(255)",
     "pyme_interest": "VARCHAR(64) NOT NULL DEFAULT 'unknown'",
     "estimated_renewal_date": "DATE",
+    "meic_size": "VARCHAR(64)",
 }
 
 DATA_SOURCE_COLUMNS = {

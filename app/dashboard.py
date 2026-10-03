@@ -56,37 +56,55 @@ SOURCE_TYPE_LABELS = {
 
 
 st.set_page_config(page_title=settings.app_title, layout="wide")
-st.title("Prospectos PYME Costa Rica")
-st.caption(
-    "Piloto: servicios profesionales en San José. Dashboard local para revisar prospectos, "
-    "fuentes, certificación y seguimiento comercial. Este MVP no realiza scraping en vivo."
+st.markdown(
+    """
+    <style>
+    html, body, [class*="css"] {
+        font-size: 16px;
+    }
+    .stMarkdown, .stText, .stCaption, .stSelectbox, .stTextInput, .stDateInput,
+    .stButton, .stDownloadButton, .stDataFrame, .stTable {
+        font-size: 1rem;
+    }
+    [data-testid="stSidebar"] label, [data-testid="stSidebar"] p {
+        font-size: 1rem;
+    }
+    div[data-testid="stCaptionContainer"] p {
+        font-size: 1.1rem;
+        line-height: 1.4;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
 )
+st.title("Prospectos para renovación de certificación PYME")
+st.caption("Dashboard para revisión de prospectos para renovación de certificación y seguimiento")
 
 
 @st.cache_data(ttl=30)
 def load_companies(
     search: str,
-    province: str,
     sector: str,
-    status: str,
-    priority: str,
-    pyme_interest: str,
+    meic_size: str,
+    start_date: date | None,
+    end_date: date | None,
+    province: str,
 ) -> pd.DataFrame:
     with SessionLocal() as session:
         query = select(Company)
         if search:
             like = f"%{search.lower()}%"
             query = query.where(Company.normalized_name.like(like))
-        if province and province != "Todas":
-            query = query.where(Company.province == province)
         if sector and sector != "Todos":
             query = query.where(Company.sector == sector)
-        if status and status != "Todos":
-            query = query.where(Company.status == STATUS_BY_LABEL[status])
-        if priority and priority != "Todas":
-            query = query.where(Company.prospect_priority == PRIORITY_BY_LABEL[priority])
-        if pyme_interest and pyme_interest != "Todos":
-            query = query.where(Company.pyme_interest == PYME_INTEREST_BY_LABEL[pyme_interest])
+        if meic_size and meic_size != "Todos":
+            query = query.where(Company.meic_size == meic_size)
+        if start_date:
+            query = query.where(Company.estimated_renewal_date >= start_date)
+        if end_date:
+            query = query.where(Company.estimated_renewal_date <= end_date)
+        if province and province != "Todas":
+            query = query.where(Company.province == province)
 
         companies = session.scalars(query.order_by(Company.legal_name)).all()
         return pd.DataFrame(
@@ -95,7 +113,9 @@ def load_companies(
                     "id": company.id,
                     "legal_name": company.legal_name,
                     "trade_name": company.trade_name,
+                    "tax_id": company.tax_id,
                     "sector": company.sector,
+                    "meic_size": company.meic_size,
                     "province": company.province,
                     "canton": company.canton,
                     "email": company.email,
@@ -118,12 +138,13 @@ def load_companies(
 
 
 @st.cache_data(ttl=60)
-def load_filter_values() -> tuple[list[str], list[str]]:
+def load_filter_values() -> tuple[list[str], list[str], list[str]]:
     with SessionLocal() as session:
         companies = session.scalars(select(Company)).all()
-        provinces = sorted({company.province for company in companies if company.province})
         sectors = sorted({company.sector for company in companies if company.sector})
-        return provinces, sectors
+        sizes = sorted({company.meic_size for company in companies if company.meic_size})
+        provinces = sorted({company.province for company in companies if company.province})
+        return sectors, sizes, provinces
 
 
 def get_company(company_id: int) -> Company | None:
@@ -182,31 +203,46 @@ def update_company_tracking(
 
 
 def company_table(companies_df: pd.DataFrame) -> int | None:
-    display_df = companies_df[
+    page_size = st.selectbox("Filas por página", [10, 25, 50], index=1)
+    total_rows = len(companies_df)
+    total_pages = max(1, (total_rows + page_size - 1) // page_size)
+
+    current_page = st.session_state.get("company_table_page", 1)
+    current_page = min(max(current_page, 1), total_pages)
+    st.session_state.company_table_page = current_page
+
+    nav_left, nav_mid, nav_right = st.columns([1, 2, 1])
+    with nav_left:
+        if st.button("Página anterior", disabled=current_page <= 1):
+            st.session_state.company_table_page = current_page - 1
+            st.rerun()
+    with nav_mid:
+        st.write(f"Página {current_page} de {total_pages} · {total_rows} empresas")
+    with nav_right:
+        if st.button("Página siguiente", disabled=current_page >= total_pages):
+            st.session_state.company_table_page = current_page + 1
+            st.rerun()
+
+    start = (current_page - 1) * page_size
+    end = start + page_size
+    page_df = companies_df.iloc[start:end].reset_index(drop=True)
+    display_df = page_df[
         [
-            "id",
+            "tax_id",
             "legal_name",
-            "trade_name",
             "sector",
+            "meic_size",
+            "estimated_renewal_date",
             "province",
-            "canton",
-            "email",
-            "phone",
-            "priority_label",
-            "status_label",
         ]
     ].rename(
         columns={
-            "id": "ID",
-            "legal_name": "Razón social",
-            "trade_name": "Nombre comercial",
-            "sector": "Sector",
-            "province": "Provincia",
-            "canton": "Cantón",
-            "email": "Correo",
-            "phone": "Teléfono",
-            "priority_label": "Prioridad",
-            "status_label": "Estado",
+            "tax_id": "IDENTIFICACION",
+            "legal_name": "NOMBRE",
+            "sector": "SECTOR",
+            "meic_size": "TAMAÑO",
+            "estimated_renewal_date": "FECHA_VIGENCIA",
+            "province": "PROVINCIA",
         }
     )
 
@@ -219,16 +255,16 @@ def company_table(companies_df: pd.DataFrame) -> int | None:
         selection_mode="single-row",
         on_select="rerun",
         column_config={
-            "ID": st.column_config.NumberColumn("ID", width="small"),
-            "Razón social": st.column_config.TextColumn("Razón social", width="medium"),
-            "Nombre comercial": st.column_config.TextColumn("Nombre comercial", width="medium"),
-            "Sector": st.column_config.TextColumn("Sector", width="medium"),
-            "Provincia": st.column_config.TextColumn("Provincia", width="small"),
-            "Cantón": st.column_config.TextColumn("Cantón", width="small"),
-            "Correo": st.column_config.TextColumn("Correo", width="medium"),
-            "Teléfono": st.column_config.TextColumn("Teléfono", width="small"),
-            "Prioridad": st.column_config.TextColumn("Prioridad", width="small"),
-            "Estado": st.column_config.TextColumn("Estado", width="small"),
+            "IDENTIFICACION": st.column_config.TextColumn("IDENTIFICACION", width="small"),
+            "NOMBRE": st.column_config.TextColumn("NOMBRE", width="large"),
+            "SECTOR": st.column_config.TextColumn("SECTOR", width="medium"),
+            "TAMAÑO": st.column_config.TextColumn("TAMAÑO", width="small"),
+            "FECHA_VIGENCIA": st.column_config.DateColumn(
+                "FECHA_VIGENCIA",
+                width="small",
+                format="DD/MM/YYYY",
+            ),
+            "PROVINCIA": st.column_config.TextColumn("PROVINCIA", width="small"),
         },
     )
 
@@ -236,7 +272,7 @@ def company_table(companies_df: pd.DataFrame) -> int | None:
     if not selected_rows:
         return None
     selected_position = selected_rows[0]
-    return int(companies_df.iloc[selected_position]["id"])
+    return int(page_df.iloc[selected_position]["id"])
 
 
 def optional_date_input(label: str, value: date | None) -> date | None:
@@ -259,7 +295,10 @@ def render_company_detail(company: Company) -> None:
             {
                 "Nombre comercial": company.trade_name,
                 "Razón social": company.legal_name,
+                "Identificación": company.tax_id,
                 "Sector": company.sector,
+                "Tamaño MEIC": company.meic_size,
+                "Fecha de vigencia": company.estimated_renewal_date,
                 "Ubicación": ", ".join(part for part in [company.canton, company.province] if part),
                 "Sitio web": company.website,
                 "Correo principal": company.email,
@@ -400,29 +439,53 @@ with st.sidebar:
         st.cache_data.clear()
 
     try:
-        provinces, sectors = load_filter_values()
+        sectors, sizes, provinces = load_filter_values()
     except SQLAlchemyError as exc:
-        provinces, sectors = [], []
+        sectors, sizes, provinces = [], [], []
         st.warning(
             f"La base de datos todavía no está lista: {exc.__class__.__name__}. "
             "Inicializá las tablas después de levantar la base."
         )
 
-    search = st.text_input("Buscar empresa")
-    province = st.selectbox("Provincia", ["Todas", *provinces])
-    sector = st.selectbox("Sector", ["Todos", *sectors])
-    status = st.selectbox("Estado", ["Todos", *STATUS_LABELS.values()])
-    priority = st.selectbox("Prioridad", ["Todas", *PRIORITY_LABELS.values()])
-    pyme_interest = st.selectbox("Interés PYME", ["Todos", *PYME_INTEREST_LABELS.values()])
+    if st.button("Limpiar filtros"):
+        st.session_state.filter_search = ""
+        st.session_state.filter_sector = "Todos"
+        st.session_state.filter_meic_size = "Todos"
+        st.session_state.filter_start_date = None
+        st.session_state.filter_end_date = None
+        st.session_state.filter_province = "Todas"
+        st.session_state.company_table_page = 1
+        st.rerun()
 
-try:
-    companies_df = load_companies(search, province, sector, status, priority, pyme_interest)
-except SQLAlchemyError as exc:
-    st.warning(
-        f"No se pudieron cargar las empresas: {exc.__class__.__name__}. "
-        "Inicializá la base de datos e importá datos primero."
+    search = st.text_input("Buscar empresa", key="filter_search")
+    sector = st.selectbox("Sector", ["Todos", *sectors], key="filter_sector")
+    meic_size = st.selectbox("Tamaño", ["Todos", *sizes], key="filter_meic_size")
+    start_date = st.date_input(
+        "Fecha inicio",
+        value=None,
+        format="DD/MM/YYYY",
+        key="filter_start_date",
     )
+    end_date = st.date_input(
+        "Fecha fin",
+        value=None,
+        format="DD/MM/YYYY",
+        key="filter_end_date",
+    )
+    province = st.selectbox("Provincia", ["Todas", *provinces], key="filter_province")
+
+if start_date and end_date and start_date > end_date:
+    st.warning("La fecha inicio no puede ser posterior a la fecha fin.")
     companies_df = pd.DataFrame()
+else:
+    try:
+        companies_df = load_companies(search, sector, meic_size, start_date, end_date, province)
+    except SQLAlchemyError as exc:
+        st.warning(
+            f"No se pudieron cargar las empresas: {exc.__class__.__name__}. "
+            "Inicializá la base de datos e importá datos primero."
+        )
+        companies_df = pd.DataFrame()
 
 st.subheader("Empresas")
 if companies_df.empty:

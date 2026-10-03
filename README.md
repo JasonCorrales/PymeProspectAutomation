@@ -142,6 +142,9 @@ Validate the workbook against the SQLite workflow:
 ```bash
 DATABASE_URL='sqlite:///pyme_prospects_demo.db' python3 scripts/import_meic_active_pymes.py \
   sample_data/meic_pymes_activas.xlsx \
+  --sheet pyme \
+  --limit 500 \
+  --replace-existing \
   --validate-only \
   --report-path reports/meic_active_pymes_validation.json
 ```
@@ -151,10 +154,13 @@ Import the validated workbook:
 ```bash
 DATABASE_URL='sqlite:///pyme_prospects_demo.db' python3 scripts/import_meic_active_pymes.py \
   sample_data/meic_pymes_activas.xlsx \
+  --sheet pyme \
+  --limit 500 \
+  --replace-existing \
   --report-path reports/meic_active_pymes_import.json
 ```
 
-The importer reads the `Registros PYME` and `Emprendimientos Activos` sheets by default, uses row 4 as the header, ignores blank columns/rows, records the official MEIC page as source evidence, and only asserts `certified_with_public_evidence` for rows that are clearly active/approved in the workbook.
+The local test workflow reads only the `Registros PYME` sheet via `--sheet pyme`, limits the import to the first 500 valid rows with `--limit 500`, and uses `--replace-existing` to clear existing database records before loading the bounded dataset. The importer uses row 4 as the header, ignores blank columns/rows, records the official MEIC page as source evidence, and only asserts `certified_with_public_evidence` for rows that are clearly active/approved in the workbook.
 
 ## Dashboard workflow
 
