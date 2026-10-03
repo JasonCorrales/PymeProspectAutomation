@@ -21,7 +21,6 @@ from app.db import SessionLocal, engine, init_db
 from app.models import (
     CertificationEvidenceStatus,
     Company,
-    PymeInterest,
     RunStatus,
     ScrapeRun,
     SourceType,
@@ -198,7 +197,7 @@ def build_notes(sheet_name: str, row: dict[str, object]) -> str:
 
 def mapped_import_row(sheet_name: str, row: dict[str, object]) -> dict[str, object]:
     config = SHEET_CONFIGS[sheet_name]
-    renewal_date = parse_excel_date(row.get("FECHA_VIGENCIA"))
+    certification_valid_until = parse_excel_date(row.get("FECHA_VIGENCIA"))
     sector = clean(row.get("SECTOR"))
     if sheet_name == "Emprendimientos Activos":
         sector = "Emprendimiento"
@@ -210,8 +209,7 @@ def mapped_import_row(sheet_name: str, row: dict[str, object]) -> dict[str, obje
         "province": clean(row.get("PROVINCIA")),
         "canton": clean(row.get("CANTÓN")),
         "notes": build_notes(sheet_name, row),
-        "estimated_renewal_date": renewal_date.isoformat() if renewal_date else None,
-        "pyme_interest": PymeInterest.already_certified.value,
+        "certification_valid_until": certification_valid_until.isoformat() if certification_valid_until else None,
         "source_url": MEIC_SOURCE_URL,
         "source_evidence": build_evidence(sheet_name, row),
         "terms_status": TERMS_STATUS,
@@ -324,8 +322,9 @@ def update_company_fields(company: Company, row: dict[str, object]) -> None:
     company.province = clean(row.get("province")) or company.province
     company.canton = clean(row.get("canton")) or company.canton
     company.notes = clean(row.get("notes")) or company.notes
-    company.estimated_renewal_date = parse_excel_date(row.get("estimated_renewal_date")) or company.estimated_renewal_date
-    company.pyme_interest = PymeInterest.already_certified
+    company.certification_valid_until = (
+        parse_excel_date(row.get("certification_valid_until")) or company.certification_valid_until
+    )
 
 
 def replace_existing_database_records(session: Any) -> None:

@@ -20,7 +20,6 @@ from app.models import (
     Contact,
     DataSource,
     ProspectPriority,
-    PymeInterest,
     RunStatus,
     ScrapeRun,
     SourceType,
@@ -152,7 +151,7 @@ def validate_row(row: dict[str, Any], row_number: int) -> list[ValidationIssue]:
             )
         )
 
-    for field in ["next_follow_up_date", "estimated_renewal_date"]:
+    for field in ["next_follow_up_date", "certification_valid_until"]:
         value = clean(row.get(field))
         if value:
             try:
@@ -169,7 +168,6 @@ def validate_row(row: dict[str, Any], row_number: int) -> list[ValidationIssue]:
 
     for enum_type, field in [
         (ProspectPriority, "prospect_priority"),
-        (PymeInterest, "pyme_interest"),
     ]:
         value = clean(row.get(field))
         if value and value not in {item.value for item in enum_type}:
@@ -342,11 +340,8 @@ def update_commercial_fields(company: Company, row: dict[str, object]) -> None:
     company.next_follow_up_date = parse_date(row.get("next_follow_up_date")) or company.next_follow_up_date
     company.responsible_person = clean(row.get("responsible_person")) or company.responsible_person
     company.contact_result = clean(row.get("contact_result")) or company.contact_result
-    company.pyme_interest = enum_value(
-        PymeInterest, row.get("pyme_interest"), company.pyme_interest or PymeInterest.unknown
-    )
-    company.estimated_renewal_date = (
-        parse_date(row.get("estimated_renewal_date")) or company.estimated_renewal_date
+    company.certification_valid_until = (
+        parse_date(row.get("certification_valid_until")) or company.certification_valid_until
     )
 
 

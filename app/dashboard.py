@@ -13,10 +13,11 @@ from app.config import settings
 from app.db import SessionLocal, engine, init_db
 from app.models import (
     Company,
+    CompanyContactMethod,
     CompanyStatus,
+    ContactMethodType,
     OutreachNote,
     ProspectPriority,
-    PymeInterest,
 )
 from app.schema_evolution import evolve_local_schema
 
@@ -37,24 +38,6 @@ PRIORITY_LABELS: dict[ProspectPriority, str] = {
 }
 PRIORITY_BY_LABEL = {label: priority for priority, label in PRIORITY_LABELS.items()}
 
-PYME_INTEREST_LABELS: dict[PymeInterest, str] = {
-    PymeInterest.unknown: "Desconocido",
-    PymeInterest.interested: "Interesado",
-    PymeInterest.not_interested: "No interesado",
-    PymeInterest.already_certified: "Ya certificado",
-    PymeInterest.needs_education: "Necesita educación",
-}
-PYME_INTEREST_BY_LABEL = {label: interest for interest, label in PYME_INTEREST_LABELS.items()}
-
-SOURCE_TYPE_LABELS = {
-    "sample_csv": "CSV de muestra",
-    "approved_pilot_csv": "CSV piloto aprobado",
-    "public_directory": "Directorio público",
-    "referral": "Referencia",
-    "manual": "Manual",
-}
-
-
 st.set_page_config(page_title=settings.app_title, layout="wide")
 st.markdown(
     """
@@ -72,6 +55,22 @@ st.markdown(
     div[data-testid="stCaptionContainer"] p {
         font-size: 1.1rem;
         line-height: 1.4;
+    }
+    div[data-testid="stTabs"] [role="tab"],
+    div[data-testid="stTabs"] [role="tab"] *,
+    button[role="tab"],
+    button[role="tab"] *,
+    [data-baseweb="tab"],
+    [data-baseweb="tab"] * {
+        font-size: 1.4rem !important;
+        font-weight: 700 !important;
+        line-height: 1.2 !important;
+    }
+    div[data-testid="stTabs"] [role="tab"],
+    button[role="tab"],
+    [data-baseweb="tab"] {
+        min-height: 3rem !important;
+        padding: 0.35rem 1rem !important;
     }
     </style>
     """,
@@ -100,9 +99,9 @@ def load_companies(
         if meic_size and meic_size != "Todos":
             query = query.where(Company.meic_size == meic_size)
         if start_date:
-            query = query.where(Company.estimated_renewal_date >= start_date)
+            query = query.where(Company.certification_valid_until >= start_date)
         if end_date:
-            query = query.where(Company.estimated_renewal_date <= end_date)
+            query = query.where(Company.certification_valid_until <= end_date)
         if province and province != "Todas":
             query = query.where(Company.province == province)
 
@@ -128,9 +127,7 @@ def load_companies(
                     "next_follow_up_date": company.next_follow_up_date,
                     "responsible_person": company.responsible_person,
                     "contact_result": company.contact_result,
-                    "pyme_interest": company.pyme_interest.value,
-                    "pyme_interest_label": PYME_INTEREST_LABELS[company.pyme_interest],
-                    "estimated_renewal_date": company.estimated_renewal_date,
+                    "certification_valid_until": company.certification_valid_until,
                 }
                 for company in companies
             ]
@@ -152,7 +149,7 @@ def get_company(company_id: int) -> Company | None:
         return session.scalar(
             select(Company)
             .options(
-                selectinload(Company.contacts),
+                selectinload(Company.contact_methods),
                 selectinload(Company.certification_statuses),
                 selectinload(Company.data_sources),
                 selectinload(Company.outreach_notes),
@@ -178,6 +175,25 @@ def add_outreach_note(
     st.cache_data.clear()
 
 
+def add_company_contact_method(
+    company_id: int,
+    name: str,
+    contact_medium: str,
+    contact_type: ContactMethodType,
+) -> None:
+    with SessionLocal() as session:
+        session.add(
+            CompanyContactMethod(
+                company_id=company_id,
+                name=name,
+                contact_medium=contact_medium,
+                contact_type=contact_type,
+            )
+        )
+        session.commit()
+    st.cache_data.clear()
+
+
 def update_company_tracking(
     company_id: int,
     status: CompanyStatus,
@@ -185,8 +201,6 @@ def update_company_tracking(
     next_follow_up_date: date | None,
     responsible_person: str | None,
     contact_result: str | None,
-    pyme_interest: PymeInterest,
-    estimated_renewal_date: date | None,
 ) -> None:
     with SessionLocal() as session:
         company = session.get(Company, company_id)
@@ -196,32 +210,18 @@ def update_company_tracking(
             company.next_follow_up_date = next_follow_up_date
             company.responsible_person = responsible_person
             company.contact_result = contact_result
-            company.pyme_interest = pyme_interest
-            company.estimated_renewal_date = estimated_renewal_date
             session.commit()
     st.cache_data.clear()
 
 
 def company_table(companies_df: pd.DataFrame) -> int | None:
-    page_size = st.selectbox("Filas por página", [10, 25, 50], index=1)
+    page_size = st.session_state.get("company_table_page_size", 25)
     total_rows = len(companies_df)
     total_pages = max(1, (total_rows + page_size - 1) // page_size)
 
     current_page = st.session_state.get("company_table_page", 1)
     current_page = min(max(current_page, 1), total_pages)
     st.session_state.company_table_page = current_page
-
-    nav_left, nav_mid, nav_right = st.columns([1, 2, 1])
-    with nav_left:
-        if st.button("Página anterior", disabled=current_page <= 1):
-            st.session_state.company_table_page = current_page - 1
-            st.rerun()
-    with nav_mid:
-        st.write(f"Página {current_page} de {total_pages} · {total_rows} empresas")
-    with nav_right:
-        if st.button("Página siguiente", disabled=current_page >= total_pages):
-            st.session_state.company_table_page = current_page + 1
-            st.rerun()
 
     start = (current_page - 1) * page_size
     end = start + page_size
@@ -232,7 +232,7 @@ def company_table(companies_df: pd.DataFrame) -> int | None:
             "legal_name",
             "sector",
             "meic_size",
-            "estimated_renewal_date",
+            "certification_valid_until",
             "province",
         ]
     ].rename(
@@ -241,7 +241,7 @@ def company_table(companies_df: pd.DataFrame) -> int | None:
             "legal_name": "NOMBRE",
             "sector": "SECTOR",
             "meic_size": "TAMAÑO",
-            "estimated_renewal_date": "FECHA_VIGENCIA",
+            "certification_valid_until": "FECHA_VIGENCIA",
             "province": "PROVINCIA",
         }
     )
@@ -268,6 +268,28 @@ def company_table(companies_df: pd.DataFrame) -> int | None:
         },
     )
 
+    nav_left, nav_size, nav_mid, nav_right = st.columns([1, 1, 2, 1])
+    with nav_left:
+        if st.button("Página anterior", disabled=current_page <= 1):
+            st.session_state.company_table_page = current_page - 1
+            st.rerun()
+    with nav_size:
+        selected_page_size = st.selectbox(
+            "Filas por página",
+            [10, 25, 50],
+            index=[10, 25, 50].index(page_size),
+            key="company_table_page_size",
+        )
+        if selected_page_size != page_size:
+            st.session_state.company_table_page = 1
+            st.rerun()
+    with nav_mid:
+        st.write(f"Página {current_page} de {total_pages} · {total_rows} empresas")
+    with nav_right:
+        if st.button("Página siguiente", disabled=current_page >= total_pages):
+            st.session_state.company_table_page = current_page + 1
+            st.rerun()
+
     selected_rows = table_event.selection.rows
     if not selected_rows:
         return None
@@ -285,32 +307,13 @@ def optional_date_input(label: str, value: date | None) -> date | None:
 def render_company_detail(company: Company) -> None:
     st.markdown(f"### {company.legal_name}")
 
-    summary_left, summary_mid, summary_right = st.columns(3)
+    summary_left, summary_right = st.columns(2)
     summary_left.metric("Estado comercial", STATUS_LABELS[company.status])
-    summary_mid.metric("Prioridad", PRIORITY_LABELS[company.prospect_priority])
-    summary_right.metric("Interés PYME", PYME_INTEREST_LABELS[company.pyme_interest])
-
-    with st.expander("Información general", expanded=True):
-        st.write(
-            {
-                "Nombre comercial": company.trade_name,
-                "Razón social": company.legal_name,
-                "Identificación": company.tax_id,
-                "Sector": company.sector,
-                "Tamaño MEIC": company.meic_size,
-                "Fecha de vigencia": company.estimated_renewal_date,
-                "Ubicación": ", ".join(part for part in [company.canton, company.province] if part),
-                "Sitio web": company.website,
-                "Correo principal": company.email,
-                "Teléfono principal": company.phone,
-                "Notas": company.notes,
-            }
-        )
+    summary_right.metric("Prioridad", PRIORITY_LABELS[company.prospect_priority])
 
     with st.expander("Seguimiento comercial", expanded=True):
         status_options = list(STATUS_LABELS.values())
         priority_options = list(PRIORITY_LABELS.values())
-        interest_options = list(PYME_INTEREST_LABELS.values())
 
         tracking_left, tracking_right = st.columns(2)
         with tracking_left:
@@ -325,18 +328,10 @@ def render_company_detail(company: Company) -> None:
                 index=priority_options.index(PRIORITY_LABELS[company.prospect_priority]),
             )
             responsible_person = st.text_input("Responsable", value=company.responsible_person or "")
+        with tracking_right:
+            contact_result = st.text_input("Resultado del contacto", value=company.contact_result or "")
             next_follow_up_date = optional_date_input(
                 "Próximo seguimiento", company.next_follow_up_date
-            )
-        with tracking_right:
-            selected_interest_label = st.selectbox(
-                "Interés en certificación PYME",
-                interest_options,
-                index=interest_options.index(PYME_INTEREST_LABELS[company.pyme_interest]),
-            )
-            contact_result = st.text_input("Resultado del contacto", value=company.contact_result or "")
-            estimated_renewal_date = optional_date_input(
-                "Renovación estimada", company.estimated_renewal_date
             )
 
         if st.button("Guardar seguimiento"):
@@ -347,54 +342,71 @@ def render_company_detail(company: Company) -> None:
                 next_follow_up_date,
                 responsible_person.strip() or None,
                 contact_result.strip() or None,
-                PYME_INTEREST_BY_LABEL[selected_interest_label],
-                estimated_renewal_date,
             )
             st.success("Seguimiento actualizado.")
             st.rerun()
 
-    detail_left, detail_right = st.columns(2)
-    with detail_left:
+    contacts_tab, add_note_tab, history_tab = st.tabs(
+        ["Contactos", "Agregar nota comercial", "Historial comercial"]
+    )
+
+    with contacts_tab:
         st.markdown("#### Contactos")
+        with st.form("add_company_contact_method"):
+            contact_name = st.text_input("Nombre")
+            contact_medium = st.text_input("Medio de contacto", placeholder="correo@empresa.com o número")
+            contact_type_label = st.selectbox(
+                "Tipo de contacto",
+                [contact_type.value for contact_type in ContactMethodType],
+            )
+            contact_submitted = st.form_submit_button("Agregar contacto")
+            if contact_submitted:
+                if not contact_name.strip() or not contact_medium.strip():
+                    st.error("El nombre y el medio de contacto son obligatorios.")
+                else:
+                    add_company_contact_method(
+                        company.id,
+                        name=contact_name.strip(),
+                        contact_medium=contact_medium.strip(),
+                        contact_type=ContactMethodType(contact_type_label),
+                    )
+                    st.success("Contacto agregado.")
+                    st.rerun()
+
         contacts = [
             {
                 "Nombre": contact.name,
-                "Cargo": contact.role,
-                "Correo": contact.email,
-                "Teléfono": contact.phone,
-                "Principal": "Sí" if contact.is_primary else "No",
+                "Medio de contacto": contact.contact_medium,
+                "Tipo de contacto": contact.contact_type.value,
+                "Creado": contact.created_at,
             }
-            for contact in company.contacts
+            for contact in company.contact_methods
         ]
         st.table(contacts or [{"Resultado": "No hay contactos registrados."}])
 
-        st.markdown("#### Certificación PYME")
-        certifications = [
-            {
-                "Certificación": cert.certification_name,
-                "Estado seguro": cert.status.value,
-                "Fuente": cert.evidence_url,
-                "Evidencia": cert.evidence_text,
-            }
-            for cert in company.certification_statuses
-        ]
-        st.table(certifications or [{"Resultado": "No hay certificaciones registradas."}])
+    with add_note_tab:
+        with st.form("add_outreach_note"):
+            st.markdown("#### Agregar nota comercial")
+            note = st.text_area("Nota")
+            channel = st.text_input("Canal", placeholder="correo, teléfono, LinkedIn, reunión")
+            next_action = st.text_input("Próxima acción")
+            created_by = st.text_input("Creado por")
+            submitted = st.form_submit_button("Agregar nota")
+            if submitted:
+                if not note.strip():
+                    st.error("La nota es obligatoria.")
+                else:
+                    add_outreach_note(
+                        company.id,
+                        note=note.strip(),
+                        channel=channel.strip() or None,
+                        next_action=next_action.strip() or None,
+                        created_by=created_by.strip() or None,
+                    )
+                    st.success("Nota comercial agregada.")
+                    st.rerun()
 
-    with detail_right:
-        st.markdown("#### Fuentes y evidencia")
-        if company.data_sources:
-            for source in company.data_sources:
-                st.info(
-                    f"**{source.source_name}** · "
-                    f"{SOURCE_TYPE_LABELS.get(source.source_type.value, source.source_type.value)}\n\n"
-                    f"Términos/uso: {source.terms_status or 'Sin validar'}\n\n"
-                    f"URL: {source.source_url or 'Sin URL'}\n\n"
-                    f"Notas de uso: {source.usage_notes or 'Sin notas'}\n\n"
-                    f"Evidencia: {source.evidence_text or 'Sin evidencia textual'}"
-                )
-        else:
-            st.info("No hay fuentes registradas.")
-
+    with history_tab:
         st.markdown("#### Historial comercial")
         if company.outreach_notes:
             for note in company.outreach_notes:
@@ -404,27 +416,6 @@ def render_company_detail(company: Company) -> None:
                 )
         else:
             st.info("Todavía no hay notas comerciales.")
-
-    with st.form("add_outreach_note"):
-        st.markdown("#### Agregar nota comercial")
-        note = st.text_area("Nota")
-        channel = st.text_input("Canal", placeholder="correo, teléfono, LinkedIn, reunión")
-        next_action = st.text_input("Próxima acción")
-        created_by = st.text_input("Creado por")
-        submitted = st.form_submit_button("Agregar nota")
-        if submitted:
-            if not note.strip():
-                st.error("La nota es obligatoria.")
-            else:
-                add_outreach_note(
-                    company.id,
-                    note=note.strip(),
-                    channel=channel.strip() or None,
-                    next_action=next_action.strip() or None,
-                    created_by=created_by.strip() or None,
-                )
-                st.success("Nota comercial agregada.")
-                st.rerun()
 
 
 with st.sidebar:
@@ -494,7 +485,7 @@ else:
     selected_company_id = company_table(companies_df)
 
     csv_buffer = StringIO()
-    export_df = companies_df.drop(columns=["status_label", "priority_label", "pyme_interest_label"]).rename(
+    export_df = companies_df.drop(columns=["status_label", "priority_label"]).rename(
         columns={"status": "pipeline_status"}
     )
     export_df.to_csv(csv_buffer, index=False)

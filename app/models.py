@@ -24,14 +24,6 @@ class ProspectPriority(str, Enum):
     high = "high"
 
 
-class PymeInterest(str, Enum):
-    unknown = "unknown"
-    interested = "interested"
-    not_interested = "not_interested"
-    already_certified = "already_certified"
-    needs_education = "needs_education"
-
-
 class CertificationEvidenceStatus(str, Enum):
     unknown = "unknown"
     needs_direct_validation = "needs_direct_validation"
@@ -53,6 +45,12 @@ class RunStatus(str, Enum):
     running = "running"
     completed = "completed"
     failed = "failed"
+
+
+class ContactMethodType(str, Enum):
+    correo = "correo"
+    celular = "celular"
+    telefono = "telefono"
 
 
 class Company(Base):
@@ -81,10 +79,7 @@ class Company(Base):
     next_follow_up_date: Mapped[date | None] = mapped_column(Date)
     responsible_person: Mapped[str | None] = mapped_column(String(128))
     contact_result: Mapped[str | None] = mapped_column(String(255))
-    pyme_interest: Mapped[PymeInterest] = mapped_column(
-        SAEnum(PymeInterest, name="pyme_interest"), default=PymeInterest.unknown, nullable=False
-    )
-    estimated_renewal_date: Mapped[date | None] = mapped_column(Date)
+    certification_valid_until: Mapped[date | None] = mapped_column(Date)
     notes: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
@@ -93,6 +88,9 @@ class Company(Base):
 
     contacts: Mapped[list[Contact]] = relationship(
         back_populates="company", cascade="all, delete-orphan"
+    )
+    contact_methods: Mapped[list[CompanyContactMethod]] = relationship(
+        back_populates="company", cascade="all, delete-orphan", order_by="CompanyContactMethod.created_at.desc()"
     )
     data_sources: Mapped[list[DataSource]] = relationship(
         back_populates="company", cascade="all, delete-orphan"
@@ -127,6 +125,25 @@ class Contact(Base):
 
     __table_args__ = (
         UniqueConstraint("company_id", "email", name="uq_contacts_company_email"),
+    )
+
+
+class CompanyContactMethod(Base):
+    __tablename__ = "company_contact_methods"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    company_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    contact_medium: Mapped[str] = mapped_column(String(255), nullable=False)
+    contact_type: Mapped[ContactMethodType] = mapped_column(
+        SAEnum(ContactMethodType, name="contact_method_type"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    company: Mapped[Company] = relationship(back_populates="contact_methods")
+
+    __table_args__ = (
+        Index("ix_company_contact_methods_company_created", "company_id", "created_at"),
     )
 
 
