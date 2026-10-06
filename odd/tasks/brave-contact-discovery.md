@@ -47,4 +47,4 @@ Constraints:
 - Verification: `DATABASE_URL='sqlite:///pyme_prospects_demo.db' python3 -m app.init_db` created/updated tables.
 - Verification: SQLite inspection confirmed `company_contact_discovery_results` columns exist.
 - Verification: Streamlit startup smoke on port 8769 reached startup URLs and was stopped by the 15s timeout.
-- Commit evidence: `3518cfb` (`feat: add automatic contact discovery`).
+- Commit evidence: `5d2147f` (`feat: add automatic contact discovery`).
