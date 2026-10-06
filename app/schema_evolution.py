@@ -4,7 +4,7 @@ from sqlalchemy import inspect, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.models import CompanyContactMethod
+from app.models import CompanyContactDiscoveryResult, CompanyContactMethod
 
 
 COMPANY_COLUMNS = {
@@ -83,6 +83,14 @@ def create_company_contact_methods_table(engine: Engine) -> list[str]:
     return ["created company_contact_methods table"]
 
 
+def create_company_contact_discovery_results_table(engine: Engine) -> list[str]:
+    inspector = inspect(engine)
+    if "company_contact_discovery_results" in inspector.get_table_names():
+        return []
+    CompanyContactDiscoveryResult.__table__.create(engine, checkfirst=True)
+    return ["created company_contact_discovery_results table"]
+
+
 def evolve_local_schema(engine: Engine) -> list[str]:
     """Apply MVP schema changes for local SQLite/PostgreSQL databases.
 
@@ -99,6 +107,7 @@ def evolve_local_schema(engine: Engine) -> list[str]:
         changes.extend(migrate_company_validity_date(engine))
         changes.extend(drop_removed_company_columns(engine))
         changes.extend(create_company_contact_methods_table(engine))
+        changes.extend(create_company_contact_discovery_results_table(engine))
     if "data_sources" in table_names:
         changes.extend(add_missing_columns(engine, "data_sources", DATA_SOURCE_COLUMNS))
     return changes

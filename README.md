@@ -62,6 +62,23 @@ POSTGRES_HOST=localhost
 POSTGRES_PORT=5432
 DATABASE_URL=postgresql+psycopg2://pyme:pyme_dev_password@localhost:5432/pyme_prospects
 APP_TITLE=Costa Rica PYME Prospect Automation
+CONTACT_DISCOVERY_PROVIDER=serpapi
+SERPAPI_API_KEY=your_serpapi_api_key
+SERPAPI_COUNTRY=cr
+SERPAPI_LANGUAGE=es
+# Alternative providers:
+# CONTACT_DISCOVERY_PROVIDER=serper
+# SERPER_API_KEY=your_serper_api_key
+# SERPER_COUNTRY=cr
+# SERPER_LANGUAGE=es
+# CONTACT_DISCOVERY_PROVIDER=brave
+# BRAVE_SEARCH_API_KEY=your_brave_search_api_key
+# BRAVE_SEARCH_COUNTRY=CR
+# BRAVE_SEARCH_LANGUAGE=es
+CONTACT_DISCOVERY_QUERY_TEMPLATES={company_name} Costa Rica contacto|{legal_name} correo teléfono|{tax_id} {company_name} Costa Rica|site:linkedin.com/company {company_name} Costa Rica|site:facebook.com {company_name} Costa Rica
+CONTACT_DISCOVERY_MAX_QUERIES=5
+CONTACT_DISCOVERY_MAX_RESULTS=8
+CONTACT_DISCOVERY_TIMEOUT_SECONDS=120
 ```
 
 > Note: `.env` should stay local and must not contain production secrets.
@@ -169,6 +186,7 @@ From the dashboard you can:
 - Filter companies by name, province, sector, MEIC size, and `FECHA_VIGENCIA` date range.
 - Select one company from the main table.
 - Inspect and register contact methods in the `Contactos` tab.
+- Run an on-demand internet contact search for a selected company using the configured contact-discovery provider. Supported providers are SerpApi, Serper, and Brave Search API; discovered candidates are stored separately and only become valid contacts when the user accepts them.
 - Update priority, next follow-up date, responsible person, and contact result.
 - Add outreach notes and next actions from the commercial-note tab, and review commercial history in its own tab.
 - Export the filtered company list as CSV.

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from io import StringIO
 
 import pandas as pd
@@ -10,12 +10,19 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import selectinload
 
 from app.config import settings
+from app.contact_discovery import (
+    ContactDiscoveryConfigError,
+    ContactDiscoveryRuntimeError,
+    discover_company_contacts,
+)
 from app.db import SessionLocal, engine, init_db
 from app.models import (
     Company,
+    CompanyContactDiscoveryResult,
     CompanyContactMethod,
     CompanyStatus,
     ContactMethodType,
+    DiscoveryResultStatus,
     OutreachNote,
     ProspectPriority,
 )
@@ -153,6 +160,7 @@ def get_company(company_id: int) -> Company | None:
             select(Company)
             .options(
                 selectinload(Company.contact_methods),
+                selectinload(Company.contact_discovery_results),
                 selectinload(Company.certification_statuses),
                 selectinload(Company.data_sources),
                 selectinload(Company.outreach_notes),
@@ -227,6 +235,44 @@ def delete_outreach_note(note_id: int) -> None:
         note = session.get(OutreachNote, note_id)
         if note:
             session.delete(note)
+            session.commit()
+    st.cache_data.clear()
+
+
+def run_contact_discovery(company_id: int) -> int:
+    with SessionLocal() as session:
+        company = session.get(Company, company_id)
+        if not company:
+            return 0
+        discovered_count = discover_company_contacts(session, company)
+    st.cache_data.clear()
+    return discovered_count
+
+
+def accept_discovered_contact(result_id: int) -> None:
+    with SessionLocal() as session:
+        result = session.get(CompanyContactDiscoveryResult, result_id)
+        if result and result.status == DiscoveryResultStatus.pending:
+            session.add(
+                CompanyContactMethod(
+                    company_id=result.company_id,
+                    name=result.candidate_name or result.source_title or "Contacto encontrado",
+                    contact_medium=result.contact_medium,
+                    contact_type=result.contact_type,
+                )
+            )
+            result.status = DiscoveryResultStatus.accepted
+            result.accepted_at = datetime.now()
+            session.commit()
+    st.cache_data.clear()
+
+
+def reject_discovered_contact(result_id: int) -> None:
+    with SessionLocal() as session:
+        result = session.get(CompanyContactDiscoveryResult, result_id)
+        if result and result.status == DiscoveryResultStatus.pending:
+            result.status = DiscoveryResultStatus.rejected
+            result.rejected_at = datetime.now()
             session.commit()
     st.cache_data.clear()
 
@@ -499,6 +545,61 @@ def render_company_detail(company: Company) -> None:
                         st.rerun()
         else:
             st.info("No hay contactos registrados.")
+
+        st.markdown("##### Búsqueda automática")
+        if st.session_state.pop("contact_discovery_success", None):
+            st.success("Búsqueda completada. Revisá los candidatos encontrados.")
+        if st.session_state.pop("contact_discovery_accepted", None):
+            st.success("Candidato agregado como contacto válido.")
+        if st.session_state.pop("contact_discovery_rejected", None):
+            st.success("Candidato descartado.")
+
+        if st.button("Buscar contactos en internet", key=f"discover_contacts_{company.id}"):
+            try:
+                with st.spinner("Buscando contactos en internet... Esto puede tardar unos segundos."):
+                    discovered_count = run_contact_discovery(company.id)
+                if discovered_count:
+                    st.session_state.contact_discovery_success = True
+                else:
+                    st.info("No se encontraron candidatos nuevos para esta empresa.")
+            except (ContactDiscoveryConfigError, ContactDiscoveryRuntimeError) as exc:
+                st.warning(str(exc))
+            else:
+                st.rerun()
+
+        pending_results = [
+            result
+            for result in company.contact_discovery_results
+            if result.status == DiscoveryResultStatus.pending
+        ]
+        if pending_results:
+            result_headers = st.columns([2, 2.5, 1.2, 1.2, 3])
+            result_headers[0].markdown("**Tipo**")
+            result_headers[1].markdown("**Medio**")
+            result_headers[2].markdown("**Confianza**")
+            result_headers[3].markdown("**Fuente**")
+            result_headers[4].markdown("**Acciones**")
+            for result in pending_results:
+                type_col, medium_col, confidence_col, source_col, action_col = st.columns([2, 2.5, 1.2, 1.2, 3])
+                type_col.write(result.contact_type.value)
+                medium_col.write(result.contact_medium)
+                confidence_col.write(result.confidence)
+                if result.source_url:
+                    source_col.link_button("Abrir", result.source_url)
+                else:
+                    source_col.write("Sin URL")
+                with action_col:
+                    accept_col, reject_col = st.columns(2)
+                    if accept_col.button("Usar como contacto", key=f"accept_discovery_{result.id}"):
+                        accept_discovered_contact(result.id)
+                        st.session_state.contact_discovery_accepted = True
+                        st.rerun()
+                    if reject_col.button("Descartar", key=f"reject_discovery_{result.id}"):
+                        reject_discovered_contact(result.id)
+                        st.session_state.contact_discovery_rejected = True
+                        st.rerun()
+        else:
+            st.caption("No hay candidatos pendientes de revisar.")
 
     with add_note_tab:
         if st.session_state.pop("note_success", None):

@@ -51,6 +51,17 @@ class ContactMethodType(str, Enum):
     correo = "correo"
     celular = "celular"
     telefono = "telefono"
+    linkedin = "linkedin"
+    facebook = "facebook"
+    instagram = "instagram"
+    website = "website"
+    otro = "otro"
+
+
+class DiscoveryResultStatus(str, Enum):
+    pending = "pending"
+    accepted = "accepted"
+    rejected = "rejected"
 
 
 class Company(Base):
@@ -91,6 +102,11 @@ class Company(Base):
     )
     contact_methods: Mapped[list[CompanyContactMethod]] = relationship(
         back_populates="company", cascade="all, delete-orphan", order_by="CompanyContactMethod.created_at.desc()"
+    )
+    contact_discovery_results: Mapped[list[CompanyContactDiscoveryResult]] = relationship(
+        back_populates="company",
+        cascade="all, delete-orphan",
+        order_by="CompanyContactDiscoveryResult.created_at.desc()",
     )
     data_sources: Mapped[list[DataSource]] = relationship(
         back_populates="company", cascade="all, delete-orphan"
@@ -144,6 +160,38 @@ class CompanyContactMethod(Base):
 
     __table_args__ = (
         Index("ix_company_contact_methods_company_created", "company_id", "created_at"),
+    )
+
+
+class CompanyContactDiscoveryResult(Base):
+    __tablename__ = "company_contact_discovery_results"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    company_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), nullable=False)
+    provider: Mapped[str] = mapped_column(String(64), nullable=False)
+    query: Mapped[str] = mapped_column(Text, nullable=False)
+    source_title: Mapped[str | None] = mapped_column(String(512))
+    source_url: Mapped[str | None] = mapped_column(String(1024))
+    snippet: Mapped[str | None] = mapped_column(Text)
+    candidate_name: Mapped[str | None] = mapped_column(String(255))
+    contact_medium: Mapped[str] = mapped_column(String(512), nullable=False)
+    contact_type: Mapped[ContactMethodType] = mapped_column(
+        SAEnum(ContactMethodType, name="discovered_contact_method_type"), nullable=False
+    )
+    confidence: Mapped[str] = mapped_column(String(32), nullable=False, default="media")
+    status: Mapped[DiscoveryResultStatus] = mapped_column(
+        SAEnum(DiscoveryResultStatus, name="discovery_result_status"),
+        default=DiscoveryResultStatus.pending,
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    rejected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    company: Mapped[Company] = relationship(back_populates="contact_discovery_results")
+
+    __table_args__ = (
+        Index("ix_company_contact_discovery_company_status", "company_id", "status"),
     )
 
 
